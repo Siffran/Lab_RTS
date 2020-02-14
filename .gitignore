@@ -144,3 +144,5 @@ startup.c
 TinyTimber.c
 
 TinyTimber.h
+
+RTSLAB/.codelite/
