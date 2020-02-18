@@ -7,25 +7,8 @@
 int brotherJohnIndex[32] = {0,2,4,0,0,2,4,0,4,5,7,4,5,7,7,9,7,5,4,0,7,9,7,5,4,0,0,-5,0,0,-5,0};
 int period[25] = {2025,1911,1804,1703,1607,1517,1432,1351,1276,1204,1136,1073,1012,956,902,851,804,758,716,676,638,602,568,536,506};
 
-//#define SPEAKER             0x4000741C;
-//#define WRITE_SPEAKER(val)  ((*(volatile uint8_t *)SPEAKER) = (val));
-
 int *SPEAKER = ((int *) 0x4000741C);
 
-/* Notes for Part 1
- * 
- * Define address to Digital to Analog converter
- * 
- * 0 to D/A - silence
- * 5-20 to D/A - sound (volume)
- * 
- * Not enough to use ASYNC when generating tone 
- * Need to use AFTER aswell to wake us up when done
- * 
- * Look in the tinytimber tutorial!
- * 
- */
- 
 typedef struct {
     Object super;
     int i;
@@ -43,9 +26,12 @@ typedef struct {
     int volume;
     int prevVolume;
     int deadline;
+    int running;
 }Tone;
 
-Tone toneGen = {initObject(), 0, 0, 0};
+Tone tone = {initObject(), 0, 0, 0, 0};
+
+//Create toneGen here
 
 typedef struct {
     Object super;
@@ -57,53 +43,67 @@ typedef struct {
 Dirty dirty = {initObject(), 1000, 0};
 
 //Declare functions
-void printBrotherJohnPeriods(int);
-void toneStop(Tone*, int);
-void toneStart(Tone*, int);
-void loadStart(Dirty*,int);
-void loadStop(Dirty*,int);
-void mute(Tone*);
-void increaseVol(Tone*);
-void decreaseVol(Tone*);
-void increaseDirt(Dirty*);
-void decreaseDirt(Dirty*);
 void reader(App*, int);
 void receiver(App*, int);
+
+void toneGen(Tone*, int);
+
+void increaseVol(Tone*);
+void decreaseVol(Tone*);
+void mute(Tone*);
+
 void deadlineSwitchTone(Tone*);
 void deadlineSwitchLoad(Dirty*);
+
+void loadGen(Dirty*,int);
+
+void increaseDirt(Dirty*);
+void decreaseDirt(Dirty*);
+
+void printBrotherJohnPeriods(int);
+
+//--------------------------------//
 
 Serial sci0 = initSerial(SCI_PORT0, &app, reader); //Talked about this on the lecture
 
 Can can0 = initCan(CAN_PORT0, &app, receiver);
 
-/*
-void toneStop(Tone *self, int arg){
-    *SPEAKER = 0;
-    AFTER(USEC(arg), self, toneStart, arg);
-}*/
+//--------------------------------//
 
-void toneStart(Tone *self, int arg){
+void toneGen(Tone *self, int arg){
     
-    for(int i = 0; i < 1000; i++){
-        
+    if(self->running){ //if running !0 do, otherwise terminate
         if(*SPEAKER != 0){
             *SPEAKER = 0;
         }else{
             *SPEAKER = self->volume;
         }
+        SEND( USEC(arg), USEC(self->deadline), self, toneGen, arg);
     }
-    
-    
-    //SEND( USEC(arg), USEC(self->deadline), self, toneStart, arg); //why not this!?
 }
 
-/*
-void loadStop(Dirty *self, int arg){
-    //After
-    AFTER(USEC(650), self, loadStart, 0); 
-}*/
+void tonePlay(){
     
-void loadStart(Dirty *self, int arg){
+    //if running do below, otherwise terminate
+    
+        //use argument and key to find period value
+        //use tempo to set deadline for Tone Object
+    
+        //Call toneGen using BEFORE with argument: period/2 (half on, half off)
+        //Kill toneGen 50-100 ms before the next tone is to be played. (set Tone Object running to 0) How to not kill instantly?
+        //How do we make sure the new tone is not begun instatly? use AFTER!?
+}
+
+void toneStart(){
+    //set running in tonePlay Object to 1
+    //call tonePlay, argument is the index that brother john starts at. 
+}
+
+void toneStop(){
+    //set running in tonePlay Object to 0
+}
+
+void loadGen(Dirty *self, int arg){
     
     if(arg == 0){
         for(int i = 0; i < self->background_loop_range; i++){}
@@ -112,10 +112,9 @@ void loadStart(Dirty *self, int arg){
         arg = 0;
     }
     
-    //SEND( USEC(650), USEC(self->background_loop_range), self, loadStart, arg);
+    SEND( USEC(650), USEC(self->background_loop_range), self, loadGen, arg);
 
     //AFTER(USEC(650), self, loadStop, 0);
-    
 }
 
 void receiver(App *self, int unused) { //interrupt from CANbus
@@ -151,7 +150,7 @@ void reader(App *self, int c) { //interrupt when key is pressed
             printBrotherJohnPeriods(self->key);
         }
         
-    }else if(c == 'e'){//end of buffer        
+    }else if(c == 'e'){ //         
         self->buffer[self->i] = '\0';                   //insert null at end of buffer
         self->i = 0;                                    //set i = 0
         
@@ -167,40 +166,21 @@ void reader(App *self, int c) { //interrupt when key is pressed
         SCI_WRITE(&sci0, "\n");
         
     }else if(c == 'p') { //increase volume by 1
-        SYNC(&toneGen, increaseVol,0);
+        SYNC(&tone, increaseVol,0);
     }else if(c == 'o') { //decrease volume by 1
-        SYNC(&toneGen, decreaseVol,0);
-    }else if (c == 'm') { //mute
-        SYNC(&toneGen, mute,0);
-    }else if (c == 'i'){
+        SYNC(&tone, decreaseVol,0);
+    }else if(c == 'm') { //mute
+        SYNC(&tone, mute,0);
+    }else if(c == 'i'){
         SYNC(&dirty, increaseDirt,0);
-    }else if (c == 'u'){
+    }else if(c == 'u'){
         SYNC(&dirty, decreaseDirt,0);
-    }else if ( c == 'd'){
-        SYNC(&toneGen, deadlineSwitchTone, 0);
+    }else if( c == 'd'){ //toggle deadlines on/off
+        SYNC(&tone, deadlineSwitchTone, 0);
         SYNC(&dirty, deadlineSwitchLoad, 0);
-    }else if( c != '\n' ){//next buffer value
-        self->buffer[self->i] = c;                      //add c to end of buffer
+    }else if( c != '\n'){ //add c to buffer
+        self->buffer[self->i] = c;
         self->i = self->i+1;
-    }
-}
-void deadlineSwitchTone(Tone* self){
-    if(self->deadline == 0){
-        self->deadline = 100;
-        SCI_WRITE(&sci0, "deadline on\n");
-    }else{
-        self->deadline = 0;
-        SCI_WRITE(&sci0, "deadline off\n");
-    }
-}
-
-void deadlineSwitchLoad(Dirty* self){
-    if(self->deadline == 0){
-        self->deadline = 1300;
-        SCI_WRITE(&sci0, "deadline on\n");
-    }else{
-        self->deadline = 0;
-        SCI_WRITE(&sci0, "deadline off\n");
     }
 }
 
@@ -227,6 +207,28 @@ void decreaseVol(Tone *self){
     }
 }
 
+void deadlineSwitchTone(Tone* self){ //Switch deadline on and off for tone generator
+    if(self->deadline == 0){
+        self->deadline = 100;
+        SCI_WRITE(&sci0, "deadline on\n");
+    }else{
+        self->deadline = 0;
+        SCI_WRITE(&sci0, "deadline off\n");
+    }
+}
+
+void deadlineSwitchLoad(Dirty* self){ //Switch deadline on and off for background loop
+    if(self->deadline == 0){
+        self->deadline = 1300;
+        SCI_WRITE(&sci0, "deadline on\n");
+    }else{
+        self->deadline = 0;
+        SCI_WRITE(&sci0, "deadline off\n");
+    }
+}
+
+/* NOT IMPORTANT FUNCTIONS */
+
 void increaseDirt(Dirty *self){
     self->background_loop_range += 500; 
     if (self->background_loop_range >= 21000) {
@@ -245,7 +247,7 @@ void decreaseDirt(Dirty *self){
     SCI_WRITE(&sci0, self->buffer);
 }
 
-void printBrotherJohnPeriods(int key){
+void printBrotherJohnPeriods(int key){ //Prints the period times for Brother John based on key.
     
     char temp[20];
     
@@ -257,7 +259,7 @@ void printBrotherJohnPeriods(int key){
     SCI_WRITE(&sci0, '\n');
 }
 
-void wcetCount(){
+void wcetCount(){  //Measure WCET of some function. returns avereage and worst time.
     Time startTime;
     Time diff;
     
@@ -270,8 +272,8 @@ void wcetCount(){
     
     for(int i = 0; i < 500; i++){
         startTime = CURRENT_OFFSET();
-        //loadStart(&dirty, 0);
-        toneStart(&toneGen, 0);
+        //loadGen(&dirty, 0);
+        toneGen(&tone, 0);
         diff = CURRENT_OFFSET();
         
         diff = diff - startTime;
@@ -299,6 +301,8 @@ void wcetCount(){
     
 }
 
+/* NOT IMPORTANT FUNCTIONS END */
+
 void startApp(App *self, int arg) {
     CANMsg msg;
 
@@ -306,11 +310,10 @@ void startApp(App *self, int arg) {
     SCI_INIT(&sci0);
     SCI_WRITE(&sci0, "Hello, hello...\n");
     
-    //ASYNC(&toneGen, toneStart, 500);
-    //ASYNC(&dirty, loadStart, 0);
+    //ASYNC(&tone, toneGen, 500);
+    //ASYNC(&dirty, loadGen, 0);
     
-    wcetCount();
-    
+    //wcetCount();
     
     msg.msgId = 1;
     msg.nodeId = 1;
