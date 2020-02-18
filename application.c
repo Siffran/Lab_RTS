@@ -54,7 +54,7 @@ typedef struct {
     char buffer[20];
 }Dirty;
 
-Dirty dirty = {initObject(), 1300, 0};
+Dirty dirty = {initObject(), 1000, 0};
 
 //Declare functions
 void printBrotherJohnPeriods(int);
@@ -84,14 +84,17 @@ void toneStop(Tone *self, int arg){
 
 void toneStart(Tone *self, int arg){
     
-    if(*SPEAKER != 0){
-        *SPEAKER = 0;
-    }else{
-        *SPEAKER = self->volume;
+    for(int i = 0; i < 1000; i++){
+        
+        if(*SPEAKER != 0){
+            *SPEAKER = 0;
+        }else{
+            *SPEAKER = self->volume;
+        }
     }
     
-    SEND( USEC(arg), USEC(self->deadline), self, toneStart, arg); //why not this!?
-    //AFTER(USEC(arg), self, toneStart, arg);
+    
+    //SEND( USEC(arg), USEC(self->deadline), self, toneStart, arg); //why not this!?
 }
 
 /*
@@ -255,7 +258,8 @@ void printBrotherJohnPeriods(int key){
 }
 
 void wcetCount(){
-    Timer time = initTimer();
+    Time startTime;
+    Time diff;
     
     char buffer1[32];
     char buffer2[32];
@@ -265,8 +269,12 @@ void wcetCount(){
     int total = 0;
     
     for(int i = 0; i < 500; i++){
-        SYNC(&dirty, loadStart, 0);
-        Time diff = T_SAMPLE(&time);
+        startTime = CURRENT_OFFSET();
+        //loadStart(&dirty, 0);
+        toneStart(&toneGen, 0);
+        diff = CURRENT_OFFSET();
+        
+        diff = diff - startTime;
         
         temp = USEC_OF(diff); // Migth need to be Long int
         
@@ -277,8 +285,6 @@ void wcetCount(){
         total = total + temp;
         
         average = total/(i+1);
-        
-        T_RESET(&time);
     }
     
     snprintf(buffer1, 32, "%d", average);
