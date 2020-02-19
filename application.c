@@ -5,7 +5,8 @@
 #include <stdio.h>
 
 int brotherJohnIndex[32] = {0,2,4,0,0,2,4,0,4,5,7,4,5,7,7,9,7,5,4,0,7,9,7,5,4,0,0,-5,0,0,-5,0};
-int period[25] = {2025,1911,1804,1703,1607,1517,1432,1351,1276,1204,1136,1073,1012,956,902,851,804,758,716,676,638,602,568,536,506};
+int periodBrotherJohn[25] = {2025,1911,1804,1703,1607,1517,1432,1351,1276,1204,1136,1073,1012,956,902,851,804,758,716,676,638,602,568,536,506};
+int beatLength[32] = {2,2,2,2,2,2,2,2,2,2,4,2,2,4,1,1,1,1,2,2,1,1,1,1,2,2,2,2,4,2,2,4};
 
 int *SPEAKER = ((int *) 0x4000741C);
 
@@ -31,7 +32,15 @@ typedef struct {
 
 Tone tone = {initObject(), 0, 0, 0, 0};
 
-//Create toneGen here
+typedef struct {
+    Object super;
+    int running;
+    int index;
+    int key;
+    int tempo;
+}ToneCord;
+
+ToneCord toneCord = {initObject(), 0, 0, 0, 150}; // Tone coordinator
 
 typedef struct {
     Object super;
@@ -47,6 +56,12 @@ void reader(App*, int);
 void receiver(App*, int);
 
 void toneGen(Tone*, int);
+void toneGenStart(Tone*);
+void toneGenStop(Tone*);
+
+void tonePlay(ToneCord*);
+void toneStart(ToneCord*);
+void toneStop(ToneCord*);
 
 void increaseVol(Tone*);
 void decreaseVol(Tone*);
@@ -72,7 +87,7 @@ Can can0 = initCan(CAN_PORT0, &app, receiver);
 
 void toneGen(Tone *self, int arg){
     
-    if(self->running){ //if running !0 do, otherwise terminate
+    if(self->running){ //if running !=0 do, otherwise terminate
         if(*SPEAKER != 0){
             *SPEAKER = 0;
         }else{
@@ -82,7 +97,22 @@ void toneGen(Tone *self, int arg){
     }
 }
 
-void tonePlay(){
+void toneGenStart(Tone *self){
+    
+    //set running to 1 in Tone Object
+    self->running = 1;
+    
+}
+
+
+void toneGenStop(Tone *self){
+    
+    //set running to 0 in Tone Object
+    self-> running = 0;
+    
+}
+
+void tonePlay(ToneCord *self){
     
     //if running do below, otherwise terminate
     
@@ -90,17 +120,40 @@ void tonePlay(){
         //use tempo to set deadline for Tone Object
     
         //Call toneGen using BEFORE with argument: period/2 (half on, half off)
-        //Kill toneGen 50-100 ms before the next tone is to be played. (set Tone Object running to 0) How to not kill instantly?
+        //Kill toneGen 50-100 ms before the next tone is to be played. (set Tone Object running to 0) How to not kill instantly?) Do we need a timer in this object?
         //How do we make sure the new tone is not begun instatly? use AFTER!?
+    
+    int tempo;
+    int period;
+    
+    if(self->running){
+        
+         period = periodBrotherJohn[brotherJohnIndex[self->index]+self->key+10];
+         tempo = (beatLength[self->index] * self->tempo)/2;
+         tempo = 60000/tempo;
+         
+         //set deadline for Tone object using tempo, do we need this?
+         
+         ASYNC( &tone, toneGen, period/2); //call toneGen
+         
+         AFTER( USEC(tempo-75), &tone, toneGenStop, 0);
+         
+         self->index++;
+         self->index = self->index % 32;
+         
+         AFTER( USEC(tempo), self, tonePlay, 0 );
+    }
+    
 }
 
-void toneStart(){
+void toneStart(ToneCord *self){
     //set running in tonePlay Object to 1
-    //call tonePlay, argument is the index that brother john starts at. 
+    self->running = 1;
 }
 
-void toneStop(){
+void toneStop(ToneCord *self){
     //set running in tonePlay Object to 0
+    self->running = 0;
 }
 
 void loadGen(Dirty *self, int arg){
@@ -252,7 +305,7 @@ void printBrotherJohnPeriods(int key){ //Prints the period times for Brother Joh
     char temp[20];
     
     for(int i; i < 32; i++){
-        sprintf(temp,"%d", period[brotherJohnIndex[i]+key+10]);
+        sprintf(temp,"%d", periodBrotherJohn[brotherJohnIndex[i]+key+10]);
         SCI_WRITE(&sci0, temp);  //print periods of brother john based on key
         SCI_WRITE(&sci0, ", ");
     }
