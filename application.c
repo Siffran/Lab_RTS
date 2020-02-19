@@ -6,7 +6,7 @@
 
 int brotherJohnIndex[32] = {0,2,4,0,0,2,4,0,4,5,7,4,5,7,7,9,7,5,4,0,7,9,7,5,4,0,0,-5,0,0,-5,0};
 int periodBrotherJohn[25] = {2025,1911,1804,1703,1607,1517,1432,1351,1276,1204,1136,1073,1012,956,902,851,804,758,716,676,638,602,568,536,506};
-int beatLength[32] = {2,2,2,2,2,2,2,2,2,2,4,2,2,4,1,1,1,1,2,2,1,1,1,1,2,2,2,2,4,2,2,4};
+int beatLength[32] = {2,2,2,2,2,2,2,2,2,2,1,2,2,1,4,4,4,4,2,2,4,4,4,4,2,2,2,2,1,2,2,1};
 
 int *SPEAKER = ((int *) 0x4000741C);
 
@@ -15,8 +15,8 @@ typedef struct {
     int i;
     int count;
     char c;
-    int key;
     int myNum;
+    int active;
     char buffer[20];
 } App;
 
@@ -38,9 +38,10 @@ typedef struct {
     int index;
     int key;
     int tempo;
+    char buffer[20];
 }ToneCord;
 
-ToneCord toneCord = {initObject(), 0, 0, 0, 150}; // Tone coordinator
+ToneCord toneCord = {initObject(), 0, 0, 0, 120}; // Tone coordinator
 
 typedef struct {
     Object super;
@@ -66,6 +67,16 @@ void toneStop(ToneCord*);
 void increaseVol(Tone*);
 void decreaseVol(Tone*);
 void mute(Tone*);
+
+void setKey(ToneCord* self, int key);
+
+void setTempo(ToneCord* self, int tempo);
+/*
+void increaseTempo(ToneCord*);
+void decreaseTempo(ToneCord*);
+*/
+
+void setDeadline(Tone*, int arg);
 
 void deadlineSwitchTone(Tone*);
 void deadlineSwitchLoad(Dirty*);
@@ -133,15 +144,17 @@ void tonePlay(ToneCord *self){
          tempo = 60000/tempo;
          
          //set deadline for Tone object using tempo, do we need this?
+         SYNC( &tone, setDeadline, period);
          
-         ASYNC( &tone, toneGen, period/2); //call toneGen
+         ASYNC( &tone, toneGen, period); //call toneGen
          
-         AFTER( USEC(tempo-75), &tone, toneGenStop, 0);
+         AFTER( MSEC(tempo-75), &tone, toneGenStop, 0);
+         SYNC(&tone, toneGenStart, 0);
          
          self->index++;
          self->index = self->index % 32;
          
-         AFTER( USEC(tempo), self, tonePlay, 0 );
+         AFTER( MSEC(tempo), self, tonePlay, 0 );
     }
     
 }
@@ -195,13 +208,9 @@ void reader(App *self, int c) { //interrupt when key is pressed
     }else if(c == 'k'){
         self->buffer[self->i] = '\0';
         self->i = 0;
-        self->key = atoi(self->buffer);
+        int key = atoi(self->buffer);
         
-        if(self->key > 5 || self->key < -5){
-            SCI_WRITE(&sci0, "input key value is not valid, enter value between -5 and 5\n");
-        }else{
-            printBrotherJohnPeriods(self->key);
-        }
+        SYNC(&toneCord, setKey, key);
         
     }else if(c == 'e'){ //         
         self->buffer[self->i] = '\0';                   //insert null at end of buffer
@@ -231,6 +240,19 @@ void reader(App *self, int c) { //interrupt when key is pressed
     }else if( c == 'd'){ //toggle deadlines on/off
         SYNC(&tone, deadlineSwitchTone, 0);
         SYNC(&dirty, deadlineSwitchLoad, 0);
+    }else if(c == 't'){
+        self->buffer[self->i] = '\0';
+        self->i = 0;
+        int tempo = atoi(self->buffer);
+        
+        SYNC(&toneCord, setTempo, tempo);
+    }else if(c == 's'){
+        if(self->active == 0){
+            SYNC(&toneCord, toneStart, 0);  
+            ASYNC(&toneCord, tonePlay, 0);  //race condition?
+        }else{
+            SYNC(&toneCord, toneStop, 0);
+        }
     }else if( c != '\n'){ //add c to buffer
         self->buffer[self->i] = c;
         self->i = self->i+1;
@@ -260,6 +282,68 @@ void decreaseVol(Tone *self){
     }
 }
 
+void setKey(ToneCord *self, int key){
+    if( key <= 5 && key >= -5){
+        self->key = key;
+        SCI_WRITE(&sci0, "New key entered \n");
+    }else{
+        SCI_WRITE(&sci0, "New key not valid \n");
+    }
+}
+
+void setTempo(ToneCord *self, int tempo){
+    if( tempo <= 240 && tempo >= 60){
+        self->tempo = tempo;
+        SCI_WRITE(&sci0, "New tempo entered \n");
+    }else{
+        SCI_WRITE(&sci0, "New tempo not valid \n");
+    }
+}
+/*
+void increaseTempo(ToneCord *self){
+    if(self->tempo < 240){
+        self->tempo += 5;
+        
+        snprintf(self->buffer, 20, "%d", self->key);
+        SCI_WRITE(&sci0, "Tempo: ");
+        SCI_WRITE(&sci0, self->buffer);
+        SCI_WRITE(&sci0, "\n");
+        
+        
+    }else{
+        self->tempo = 240;
+        
+        snprintf(self->buffer, 20, "%d", self->key);
+        SCI_WRITE(&sci0, "Tempo: ");
+        SCI_WRITE(&sci0, self->buffer);
+        SCI_WRITE(&sci0, "\n");        
+    }
+}
+
+void decreaseTempo(ToneCord *self){
+    
+    if(self->tempo > 60){
+        self->tempo -= 5;
+        
+        snprintf(self->buffer, 20, "%d", self->key);
+        SCI_WRITE(&sci0, "Tempo: ");
+        SCI_WRITE(&sci0, self->buffer);
+        SCI_WRITE(&sci0, "\n");
+        
+        
+    }else{
+        self->tempo = 60;
+        
+        snprintf(self->buffer, 20, "%d", self->key);
+        SCI_WRITE(&sci0, "Tempo: ");
+        SCI_WRITE(&sci0, self->buffer);
+        SCI_WRITE(&sci0, "\n");        
+    }
+}*/
+
+void setDeadline(Tone* self, int arg){
+    self->deadline = arg;
+}
 void deadlineSwitchTone(Tone* self){ //Switch deadline on and off for tone generator
     if(self->deadline == 0){
         self->deadline = 100;
