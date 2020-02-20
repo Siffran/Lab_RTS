@@ -299,47 +299,6 @@ void setTempo(ToneCord *self, int tempo){
         SCI_WRITE(&sci0, "New tempo not valid \n");
     }
 }
-/*
-void increaseTempo(ToneCord *self){
-    if(self->tempo < 240){
-        self->tempo += 5;
-        
-        snprintf(self->buffer, 20, "%d", self->key);
-        SCI_WRITE(&sci0, "Tempo: ");
-        SCI_WRITE(&sci0, self->buffer);
-        SCI_WRITE(&sci0, "\n");
-        
-        
-    }else{
-        self->tempo = 240;
-        
-        snprintf(self->buffer, 20, "%d", self->key);
-        SCI_WRITE(&sci0, "Tempo: ");
-        SCI_WRITE(&sci0, self->buffer);
-        SCI_WRITE(&sci0, "\n");        
-    }
-}
-
-void decreaseTempo(ToneCord *self){
-    
-    if(self->tempo > 60){
-        self->tempo -= 5;
-        
-        snprintf(self->buffer, 20, "%d", self->key);
-        SCI_WRITE(&sci0, "Tempo: ");
-        SCI_WRITE(&sci0, self->buffer);
-        SCI_WRITE(&sci0, "\n");
-        
-        
-    }else{
-        self->tempo = 60;
-        
-        snprintf(self->buffer, 20, "%d", self->key);
-        SCI_WRITE(&sci0, "Tempo: ");
-        SCI_WRITE(&sci0, self->buffer);
-        SCI_WRITE(&sci0, "\n");        
-    }
-}*/
 
 void setDeadline(Tone* self, int arg){
     self->deadline = arg;
