@@ -16,11 +16,13 @@ typedef struct {
     int count;
     char c;
     int myNum;
+    int id;
+    int master;
     int active;
     char buffer[20];
 } App;
 
-App app = { initObject(), 0, 0, 'X', 0, 0};
+App app = { initObject(), 0, 0, 'X', 0, 1, 1, 0};
 
 typedef struct {
     Object super;
@@ -38,6 +40,7 @@ typedef struct {
     int index;
     int key;
     int tempo;
+    Msg tag;
     char buffer[20];
 }ToneCord;
 
@@ -57,34 +60,33 @@ void reader(App*, int);
 void receiver(App*, int);
 
 void toneGen(Tone*, int);
-void toneGenStart(Tone*);
-void toneGenStop(Tone*);
+void toneGenStart(Tone*, int);
+void toneGenStop(Tone*, int);
 
-void tonePlay(ToneCord*);
-void toneStart(ToneCord*);
-void toneStop(ToneCord*);
+void tonePlay(ToneCord*, int);
+void toneStart(ToneCord*, int);
+void toneStop(ToneCord*, int);
 
-void increaseVol(Tone*);
-void decreaseVol(Tone*);
-void mute(Tone*);
+void increaseVol(Tone*, int);
+void decreaseVol(Tone*, int);
+void mute(Tone*, int);
+
+void stopRestart(ToneCord*, int);
+void startOrStop(ToneCord*, int);
 
 void setKey(ToneCord* self, int key);
 
 void setTempo(ToneCord* self, int tempo);
-/*
-void increaseTempo(ToneCord*);
-void decreaseTempo(ToneCord*);
-*/
 
 void setDeadline(Tone*, int arg);
 
-void deadlineSwitchTone(Tone*);
-void deadlineSwitchLoad(Dirty*);
+void deadlineSwitchTone(Tone*, int);
+void deadlineSwitchLoad(Dirty*, int);
 
-void loadGen(Dirty*,int);
+void loadGen(Dirty*, int);
 
-void increaseDirt(Dirty*);
-void decreaseDirt(Dirty*);
+void increaseDirt(Dirty*, int);
+void decreaseDirt(Dirty*, int);
 
 void printBrotherJohnPeriods(int);
 
@@ -108,7 +110,7 @@ void toneGen(Tone *self, int arg){
     }
 }
 
-void toneGenStart(Tone *self){
+void toneGenStart(Tone *self, int unused){
     
     //set running to 1 in Tone Object
     self->running = 1;
@@ -116,57 +118,46 @@ void toneGenStart(Tone *self){
 }
 
 
-void toneGenStop(Tone *self){
+void toneGenStop(Tone *self, int unused){
     
     //set running to 0 in Tone Object
     self-> running = 0;
     
 }
 
-void tonePlay(ToneCord *self){
+void tonePlay(ToneCord *self, int unused){
     
     //if running do below, otherwise terminate
     
         //use argument and key to find period value
         //use tempo to set deadline for Tone Object
     
-        //Call toneGen using BEFORE with argument: period/2 (half on, half off)
+        //Call toneGen using BEFORE with argument: period
         //Kill toneGen 50-100 ms before the next tone is to be played. (set Tone Object running to 0) How to not kill instantly?) Do we need a timer in this object?
         //How do we make sure the new tone is not begun instatly? use AFTER!?
     
     int tempo;
     int period;
-    
+
     if(self->running){
         
-         period = periodBrotherJohn[brotherJohnIndex[self->index]+self->key+10];
-         tempo = (beatLength[self->index] * self->tempo)/2;
-         tempo = 60000/tempo;
+        period = periodBrotherJohn[brotherJohnIndex[self->index]+self->key+10];
+        tempo = (beatLength[self->index] * self->tempo)/2;
+        tempo = 60000/tempo;
          
-         //set deadline for Tone object using tempo, do we need this?
-         SYNC( &tone, setDeadline, period);
+        //set deadline for Tone object using tempo, do we need this?
+        SYNC( &tone, setDeadline, period);
          
-         ASYNC( &tone, toneGen, period); //call toneGen
+        ASYNC( &tone, toneGen, period); //call toneGen
          
-         AFTER( MSEC(tempo-75), &tone, toneGenStop, 0);
-         SYNC(&tone, toneGenStart, 0);
+        AFTER( MSEC(tempo-75), &tone, toneGenStop, 0);
+        SYNC(&tone, toneGenStart, 0);
          
-         self->index++;
-         self->index = self->index % 32;
+        self->index++;
+        self->index = self->index % 32;
          
-         AFTER( MSEC(tempo), self, tonePlay, 0 );
+        self->tag = AFTER( MSEC(tempo), self, tonePlay, 0 );
     }
-    
-}
-
-void toneStart(ToneCord *self){
-    //set running in tonePlay Object to 1
-    self->running = 1;
-}
-
-void toneStop(ToneCord *self){
-    //set running in tonePlay Object to 0
-    self->running = 0;
 }
 
 void loadGen(Dirty *self, int arg){
@@ -185,12 +176,42 @@ void loadGen(Dirty *self, int arg){
 
 void receiver(App *self, int unused) { //interrupt from CANbus
     CANMsg msg;
+    
     CAN_RECEIVE(&can0, &msg);
     SCI_WRITE(&sci0, "Can msg received: ");
     SCI_WRITE(&sci0, msg.buff);
+    SCI_WRITE(&sci0, "\n");
+    
+    
+    if(msg.msgId == self->id){
+        
+        switch (msg.buff[msg.length-1]){
+            case 's':
+                SYNC(&toneCord, startOrStop, 0);
+            break;
+
+            case 't':
+                SYNC(&toneCord, setTempo, msg.buff[0]);
+            break;
+            
+            case 'x':
+                SYNC(&toneCord, stopRestart, 0);
+            break;
+        
+            case 'k':
+                SYNC(&toneCord, setKey, msg.buff[0]);
+            break;
+            
+            default:
+                SCI_WRITE(&sci0, "CAN message not recognized \n");
+        
+        }
+    }
 }
 
 void reader(App *self, int c) { //interrupt when key is pressed
+    
+    CANMsg msg;
     
     SCI_WRITE(&sci0, "Rcv: \'");
     SCI_WRITECHAR(&sci0, c);
@@ -206,11 +227,21 @@ void reader(App *self, int c) { //interrupt when key is pressed
         SCI_WRITE(&sci0, "\n");
         
     }else if(c == 'k'){
-        self->buffer[self->i] = '\0';
-        self->i = 0;
-        int key = atoi(self->buffer);
-        
-        SYNC(&toneCord, setKey, key);
+        if(self->master){
+            
+            self->buffer[self->i] = '\0';
+            self->i = 0;
+            int key = atoi(self->buffer);
+            
+            msg.msgId = 1;
+            msg.nodeId = 1;
+            msg.length = 2;
+            msg.buff[0] = key;
+            msg.buff[1] = 'k';
+            CAN_SEND(&can0, &msg);
+            
+            //SYNC(&toneCord, setKey, key);
+        }
         
     }else if(c == 'e'){ //         
         self->buffer[self->i] = '\0';                   //insert null at end of buffer
@@ -241,25 +272,74 @@ void reader(App *self, int c) { //interrupt when key is pressed
         SYNC(&tone, deadlineSwitchTone, 0);
         SYNC(&dirty, deadlineSwitchLoad, 0);
     }else if(c == 't'){
-        self->buffer[self->i] = '\0';
-        self->i = 0;
-        int tempo = atoi(self->buffer);
         
-        SYNC(&toneCord, setTempo, tempo);
-    }else if(c == 's'){
-        if(self->active == 0){
-            SYNC(&toneCord, toneStart, 0);  
-            ASYNC(&toneCord, tonePlay, 0);  //race condition?
-        }else{
-            SYNC(&toneCord, toneStop, 0);
+        if(self->master){
+            
+            self->buffer[self->i] = '\0';
+            self->i = 0;
+            int tempo = atoi(self->buffer);
+            
+            msg.msgId = 1;
+            msg.nodeId = 1;
+            msg.length = 2;
+            msg.buff[0] = tempo;
+            msg.buff[1] = 't';
+            CAN_SEND(&can0, &msg);
+            
+            //SYNC(&toneCord, setTempo, tempo);
         }
+        
+    }else if(c == 's'){
+        if(self->master){
+            
+            msg.msgId = 1;
+            msg.nodeId = 1;
+            msg.length = 1;
+            msg.buff[0] = 's';
+            CAN_SEND(&can0, &msg);
+            
+            //SYNC(&toneCord, startOrStop, 0);
+        }
+        
+    }else if(c == 'x'){
+        
+        if(self->master){
+            
+            msg.msgId = 1;
+            msg.nodeId = 1;
+            msg.length = 1;
+            msg.buff[0] = 'x';
+            CAN_SEND(&can0, &msg);
+            
+            //SYNC(&toneCord, stopRestart, 0);
+        }
+        
     }else if( c != '\n'){ //add c to buffer
         self->buffer[self->i] = c;
         self->i = self->i+1;
     }
 }
 
-void mute(Tone *self){
+void stopRestart(ToneCord *self, int unused){
+    self->index = 0;
+}
+
+void startOrStop(ToneCord *self, int unused){ //The play function
+    if(self->running == 0){
+            self->running = 1;
+            ASYNC(&toneCord, tonePlay, 0);
+            SCI_WRITE(&sci0, "Song Started");
+            
+    }else{
+            self->running = 0;
+            ABORT(self->tag);
+            SYNC(&tone, toneGenStop, 0);
+            SCI_WRITE(&sci0, "Song Stoped");
+            
+    }
+}
+
+void mute(Tone *self, int unused){
     if (self->volume != 0) {
         self->prevVolume = self->volume;
         self->volume = 0; 
@@ -268,14 +348,14 @@ void mute(Tone *self){
     }
 }
 
-void increaseVol(Tone *self){
+void increaseVol(Tone *self, int unused){
     self->volume += 1; 
     if (self->volume >= 20) {
         self->volume = 20; 
     }  
 }
 
-void decreaseVol(Tone *self){
+void decreaseVol(Tone *self, int unused){
     self->volume -= 1; 
     if (self->volume <= 0) {
         self->volume = 0;
@@ -303,7 +383,7 @@ void setTempo(ToneCord *self, int tempo){
 void setDeadline(Tone* self, int arg){
     self->deadline = arg;
 }
-void deadlineSwitchTone(Tone* self){ //Switch deadline on and off for tone generator
+void deadlineSwitchTone(Tone* self, int unused){ //Switch deadline on and off for tone generator
     if(self->deadline == 0){
         self->deadline = 100;
         SCI_WRITE(&sci0, "deadline on\n");
@@ -313,7 +393,7 @@ void deadlineSwitchTone(Tone* self){ //Switch deadline on and off for tone gener
     }
 }
 
-void deadlineSwitchLoad(Dirty* self){ //Switch deadline on and off for background loop
+void deadlineSwitchLoad(Dirty* self, int unused){ //Switch deadline on and off for background loop
     if(self->deadline == 0){
         self->deadline = 1300;
         SCI_WRITE(&sci0, "deadline on\n");
@@ -325,7 +405,7 @@ void deadlineSwitchLoad(Dirty* self){ //Switch deadline on and off for backgroun
 
 /* NOT IMPORTANT FUNCTIONS */
 
-void increaseDirt(Dirty *self){
+void increaseDirt(Dirty *self, int unused){
     self->background_loop_range += 500; 
     if (self->background_loop_range >= 21000) {
         self->background_loop_range = 21000; 
@@ -334,7 +414,7 @@ void increaseDirt(Dirty *self){
     SCI_WRITE(&sci0, self->buffer);
 }
 
-void decreaseDirt(Dirty *self){
+void decreaseDirt(Dirty *self, int unused){
     self->background_loop_range -= 500; 
     if (self->background_loop_range <= 0) {
         self->background_loop_range = 0;
@@ -406,10 +486,17 @@ void startApp(App *self, int arg) {
     SCI_INIT(&sci0);
     SCI_WRITE(&sci0, "Hello, hello...\n");
     
-    //ASYNC(&tone, toneGen, 500);
-    //ASYNC(&dirty, loadGen, 0);
     
-    //wcetCount();
+    /* TESTTESTTES
+    char buffer[10];
+    uchar a = 1;
+    uchar b = 2;
+    
+    int c = a + b;
+    
+    snprintf(buffer,10,"%d", c);
+    SCI_WRITE(&sci0, buffer);
+    */
     
     msg.msgId = 1;
     msg.nodeId = 1;
