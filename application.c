@@ -17,12 +17,12 @@ typedef struct {
     char c;
     int myNum;
     int id;
-    int master;
+    int numOfSlaves;
     int active;
     char buffer[20];
 } App;
 
-App app = { initObject(), 0, 0, 'X', 0, 1, 1, 0};
+App app = { initObject(), 0, 0, 'X', 0, 0, 2, 0};
 
 typedef struct {
     Object super;
@@ -182,7 +182,35 @@ void receiver(App *self, int unused) { //interrupt from CANbus
     SCI_WRITE(&sci0, msg.buff);
     SCI_WRITE(&sci0, "\n");
     
+    /*
+     * 1 = tempo
+     * 2 = key
+     * 3 = start/stop
+     * 4 = restart
+     * */
     
+    if(msg.nodeId == self->id){
+        
+        switch(msg.msgId){
+            case 1:
+               SYNC(&toneCord, setTempo, msg.buff[0]);
+            break;
+            
+            case 2:
+                SYNC(&toneCord, setKey, msg.buff[0]);
+            break;
+            
+            case 3:
+                SYNC(&toneCord, startOrStop, 0);
+            break;
+            
+            case 4:
+                SYNC(&toneCord, stopRestart, 0);
+            break;
+        }
+    }
+    
+    /*
     if(msg.msgId == self->id){
         
         switch (msg.buff[msg.length-1]){
@@ -206,7 +234,7 @@ void receiver(App *self, int unused) { //interrupt from CANbus
                 SCI_WRITE(&sci0, "CAN message not recognized \n");
         
         }
-    }
+    }*/
 }
 
 void reader(App *self, int c) { //interrupt when key is pressed
@@ -227,22 +255,23 @@ void reader(App *self, int c) { //interrupt when key is pressed
         SCI_WRITE(&sci0, "\n");
         
     }else if(c == 'k'){
-        if(self->master){
+        self->buffer[self->i] = '\0';
+        self->i = 0;
+        int key = atoi(self->buffer);
+        key += 5;
             
-            self->buffer[self->i] = '\0';
-            self->i = 0;
-            int key = atoi(self->buffer);
-            
-            msg.msgId = 1;
-            msg.nodeId = 1;
-            msg.length = 2;
-            msg.buff[0] = key;
-            msg.buff[1] = 'k';
-            CAN_SEND(&can0, &msg);
-            
-            //SYNC(&toneCord, setKey, key);
+        if(self->numOfSlaves){
+                
+            for(int i = 1; i <= self->numOfSlaves; i++){
+                    
+                msg.msgId = 2;
+                msg.nodeId = i;
+                msg.length = 1;
+                msg.buff[0] = key;
+                CAN_SEND(&can0, &msg);
+            }
+            SYNC(&toneCord, setKey, key);
         }
-        
     }else if(c == 'e'){ //         
         self->buffer[self->i] = '\0';                   //insert null at end of buffer
         self->i = 0;                                    //set i = 0
@@ -265,53 +294,55 @@ void reader(App *self, int c) { //interrupt when key is pressed
     }else if(c == 'm') { //mute
         SYNC(&tone, mute,0);
     }else if(c == 'i'){
-        SYNC(&dirty, increaseDirt,0);
+        
     }else if(c == 'u'){
         SYNC(&dirty, decreaseDirt,0);
     }else if( c == 'd'){ //toggle deadlines on/off
         SYNC(&tone, deadlineSwitchTone, 0);
         SYNC(&dirty, deadlineSwitchLoad, 0);
     }else if(c == 't'){
+        self->buffer[self->i] = '\0';
+        self->i = 0;
+        int tempo = atoi(self->buffer);
         
-        if(self->master){
-            
-            self->buffer[self->i] = '\0';
-            self->i = 0;
-            int tempo = atoi(self->buffer);
-            
-            msg.msgId = 1;
-            msg.nodeId = 1;
-            msg.length = 2;
-            msg.buff[0] = tempo;
-            msg.buff[1] = 't';
-            CAN_SEND(&can0, &msg);
-            
-            //SYNC(&toneCord, setTempo, tempo);
+        if(self->numOfSlaves){
+        
+            for(int i = 1; i <= self->numOfSlaves; i++){
+                msg.msgId = 1;
+                msg.nodeId = i;
+                msg.length = 1;
+                msg.buff[0] = tempo;
+                //msg.buff[1] = 't';
+                CAN_SEND(&can0, &msg);
+            }
+            SYNC(&toneCord, setTempo, tempo);
         }
-        
     }else if(c == 's'){
-        if(self->master){
+        if(self->numOfSlaves){
             
-            msg.msgId = 1;
-            msg.nodeId = 1;
-            msg.length = 1;
-            msg.buff[0] = 's';
-            CAN_SEND(&can0, &msg);
-            
-            //SYNC(&toneCord, startOrStop, 0);
+            for(int i = 1; i <= self->numOfSlaves; i++){
+                
+                msg.msgId = 3;
+                msg.nodeId = i;
+                msg.length = 0;
+                //msg.buff[0] = 's';
+                CAN_SEND(&can0, &msg);
+            }
+            SYNC(&toneCord, startOrStop, 0);
         }
         
     }else if(c == 'x'){
         
-        if(self->master){
+        if(self->numOfSlaves){
             
-            msg.msgId = 1;
-            msg.nodeId = 1;
-            msg.length = 1;
-            msg.buff[0] = 'x';
-            CAN_SEND(&can0, &msg);
-            
-            //SYNC(&toneCord, stopRestart, 0);
+            for(int i = 1; i <= self->numOfSlaves; i++){
+                msg.msgId = 4;
+                msg.nodeId = i;
+                msg.length = 0;
+                //msg.buff[0] = 'x';
+                CAN_SEND(&can0, &msg);
+            }
+            SYNC(&toneCord, stopRestart, 0);
         }
         
     }else if( c != '\n'){ //add c to buffer
@@ -363,6 +394,7 @@ void decreaseVol(Tone *self, int unused){
 }
 
 void setKey(ToneCord *self, int key){
+    key -= 5;
     if( key <= 5 && key >= -5){
         self->key = key;
         SCI_WRITE(&sci0, "New key entered \n");
