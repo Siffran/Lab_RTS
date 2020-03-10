@@ -32,7 +32,7 @@ typedef struct {
     int running;
 }Tone;
 
-Tone tone = {initObject(), 0, 0, 0, 0};
+Tone tone = {initObject(), 15, 0, 100, 0};
 
 typedef struct {
     Object super;
@@ -77,6 +77,8 @@ void startOrStop(ToneCord*, int);
 void setKey(ToneCord* self, int key);
 
 void setTempo(ToneCord* self, int tempo);
+
+void setIndex(ToneCord* self, int index);
 
 void setDeadline(Tone*, int arg);
 
@@ -202,11 +204,24 @@ void receiver(App *self, int unused) { //interrupt from CANbus
             
             case 3:
                 SYNC(&toneCord, startOrStop, 0);
+                //SYNC(&toneCord, stopRestart, 0);
             break;
             
             case 4:
                 SYNC(&toneCord, stopRestart, 0);
             break;
+            
+            case 5:
+                if(self->id == 1){
+                    AFTER(MSEC((6000/toneCord.tempo)*4), &toneCord, startOrStop, 0);
+                }else if(self->id == 2){
+                    AFTER(MSEC((6000/toneCord.tempo)*8), &toneCord, startOrStop, 0);
+                }
+                //SYNC(&toneCord, setIndex, msg.buff[0]);
+            break;
+            
+            default:
+                SCI_WRITE(&sci0, "CAN message not recognized \n");
         }
     }
     
@@ -295,6 +310,17 @@ void reader(App *self, int c) { //interrupt when key is pressed
         SYNC(&tone, mute,0);
     }else if(c == 'i'){
         
+        if(self->numOfSlaves){
+            for(int i = 1; i <= self->numOfSlaves; i++){
+                msg.msgId = 5;
+                msg.nodeId = i;
+                //msg.buff[0] = canonDelay;
+                msg.length = 0;
+    
+                CAN_SEND(&can0, &msg);
+            }
+            SYNC(&toneCord, startOrStop, 0);
+        }
     }else if(c == 'u'){
         SYNC(&dirty, decreaseDirt,0);
     }else if( c == 'd'){ //toggle deadlines on/off
@@ -319,7 +345,7 @@ void reader(App *self, int c) { //interrupt when key is pressed
         }
     }else if(c == 's'){
         if(self->numOfSlaves){
-            
+            SYNC(&toneCord, startOrStop, 0);
             for(int i = 1; i <= self->numOfSlaves; i++){
                 
                 msg.msgId = 3;
@@ -328,7 +354,7 @@ void reader(App *self, int c) { //interrupt when key is pressed
                 //msg.buff[0] = 's';
                 CAN_SEND(&can0, &msg);
             }
-            SYNC(&toneCord, startOrStop, 0);
+            
         }
         
     }else if(c == 'x'){
@@ -410,6 +436,14 @@ void setTempo(ToneCord *self, int tempo){
     }else{
         SCI_WRITE(&sci0, "New tempo not valid \n");
     }
+}
+
+void setIndex(ToneCord *self, int index){
+    SCI_WRITE(&sci0, "New index set");
+    self->index = index;
+}
+void startCanon(ToneCord *self, int index){
+
 }
 
 void setDeadline(Tone* self, int arg){
@@ -512,7 +546,7 @@ void wcetCount(){  //Measure WCET of some function. returns avereage and worst t
 /* NOT IMPORTANT FUNCTIONS END */
 
 void startApp(App *self, int arg) {
-    CANMsg msg;
+    //CANMsg msg;
 
     CAN_INIT(&can0);
     SCI_INIT(&sci0);
@@ -529,7 +563,7 @@ void startApp(App *self, int arg) {
     snprintf(buffer,10,"%d", c);
     SCI_WRITE(&sci0, buffer);
     */
-    
+    /*
     msg.msgId = 1;
     msg.nodeId = 1;
     msg.length = 6;
@@ -539,7 +573,7 @@ void startApp(App *self, int arg) {
     msg.buff[3] = 'l';
     msg.buff[4] = 'o';
     msg.buff[5] = 0;
-    CAN_SEND(&can0, &msg);
+    CAN_SEND(&can0, &msg); */
 }
 
 int main() {
